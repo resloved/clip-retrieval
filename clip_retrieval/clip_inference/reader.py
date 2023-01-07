@@ -5,6 +5,7 @@ from PIL import Image, ImageSequence
 from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 import io
+import torch
 
 
 def folder_to_keys(folder, enable_text=True, enable_image=True, enable_metadata=False):
@@ -95,9 +96,13 @@ def get_image_dataset():
 
             if self.enable_image:
                 image_file = self.image_files[key]
-                image_tensor = self.image_transform(
-                    next(ImageSequence.Iterator(Image.open(image_file)))
-                )
+                try:
+                    image_tensor = self.image_transform(
+                        next(ImageSequence.Iterator(Image.open(image_file)))
+                    )
+                except Exception as e:
+                    print(image_file, e)
+                    image_tensor = torch.zeros([3, 224, 224], dtype=torch.float32)
                 output["image_filename"] = str(image_file)
                 output["image_tensor"] = image_tensor
 
