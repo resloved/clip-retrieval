@@ -10,7 +10,7 @@ from collections import defaultdict
 from multiprocessing.pool import ThreadPool
 import json
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageFile
 import base64
 import os
 import fire
@@ -42,20 +42,33 @@ from dataclasses import dataclass
 
 LOGGER = logging.getLogger(__name__)
 
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-for coll in list(REGISTRY._collector_to_names.keys()):  # pylint: disable=protected-access
+for coll in list(
+    REGISTRY._collector_to_names.keys()
+):  # pylint: disable=protected-access
     REGISTRY.unregister(coll)
 
-FULL_KNN_REQUEST_TIME = Histogram("full_knn_request_time", "Time spent processing knn request")
+FULL_KNN_REQUEST_TIME = Histogram(
+    "full_knn_request_time", "Time spent processing knn request"
+)
 DOWNLOAD_TIME = Histogram("download_time", "Time spent downloading an url")
-TEXT_CLIP_INFERENCE_TIME = Histogram("text_clip_inference_time", "Time spent doing a text clip inference")
-IMAGE_CLIP_INFERENCE_TIME = Histogram("image_clip_inference_time", "Time spent doing a image clip inference")
+TEXT_CLIP_INFERENCE_TIME = Histogram(
+    "text_clip_inference_time", "Time spent doing a text clip inference"
+)
+IMAGE_CLIP_INFERENCE_TIME = Histogram(
+    "image_clip_inference_time", "Time spent doing a image clip inference"
+)
 METADATA_GET_TIME = Histogram("metadata_get_time", "Time spent retrieving metadata")
 KNN_INDEX_TIME = Histogram("knn_index_time", "Time spent doing a knn on the index")
 DEDUP_TIME = Histogram("dedup_time", "Time spent deduping")
 SAFETY_TIME = Histogram("safety_time", "Time spent doing a safety inference")
-IMAGE_PREPRO_TIME = Histogram("image_prepro_time", "Time spent doing the image preprocessing")
-TEXT_PREPRO_TIME = Histogram("text_prepro_time", "Time spent doing the text preprocessing")
+IMAGE_PREPRO_TIME = Histogram(
+    "image_prepro_time", "Time spent doing the image preprocessing"
+)
+TEXT_PREPRO_TIME = Histogram(
+    "text_prepro_time", "Time spent doing the text preprocessing"
+)
 
 
 def metric_to_average(metric):
@@ -63,11 +76,20 @@ def metric_to_average(metric):
     metric_name = metric_data.name
     metric_description = metric_data.documentation
     samples = metric_data.samples
-    metric_sum = [sample.value for sample in samples if sample.name == metric_name + "_sum"][0]
-    metric_count = [sample.value for sample in samples if sample.name == metric_name + "_count"][0]
+    metric_sum = [
+        sample.value for sample in samples if sample.name == metric_name + "_sum"
+    ][0]
+    metric_count = [
+        sample.value for sample in samples if sample.name == metric_name + "_count"
+    ][0]
     if metric_count == 0:
         return metric_name, metric_description, 0, 0.0
-    return metric_name, metric_description, metric_count, 1.0 * metric_sum / metric_count
+    return (
+        metric_name,
+        metric_description,
+        metric_count,
+        1.0 * metric_sum / metric_count,
+    )
 
 
 def convert_metadata_to_base64(meta):
@@ -81,7 +103,10 @@ def convert_metadata_to_base64(meta):
         if os.path.exists(path):
             img = Image.open(path)
             buffered = BytesIO()
-            img.save(buffered, format="JPEG")
+            try:
+                img.save(buffered, format="GIF", save_all=True, disposal=2, loop=0)
+            except Exception as e:
+                img.save(buffered, format="GIF")
             img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
             meta["image"] = img_str
 
@@ -124,7 +149,13 @@ class MetricsSummary(Resource):
             )
 
             sub_metrics_strings = [
-                (name, description, int(metric_count), f"{avg:0.4f}s", f"{proportion*100:0.1f}%")
+                (
+                    name,
+                    description,
+                    int(metric_count),
+                    f"{avg:0.4f}s",
+                    f"{proportion*100:0.1f}%",
+                )
                 for name, description, metric_count, avg, proportion in sub_metrics
             ]
 
@@ -134,7 +165,8 @@ class MetricsSummary(Resource):
                 + "per request, the step costs are (in order): \n\n"
             )
             df = pd.DataFrame(
-                data=sub_metrics_strings, columns=("name", "description", "calls", "average", "proportion")
+                data=sub_metrics_strings,
+                columns=("name", "description", "calls", "average", "proportion"),
             )
             s += df.to_string()
 
@@ -157,7 +189,9 @@ def download_image(url):
     urllib_request = urllib.request.Request(
         url,
         data=None,
-        headers={"User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:72.0) Gecko/20100101 Firefox/72.0"},
+        headers={
+            "User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:72.0) Gecko/20100101 Firefox/72.0"
+        },
     )
     with urllib.request.urlopen(urllib_request, timeout=10) as r:
         img_stream = io.BytesIO(r.read())
@@ -179,10 +213,15 @@ class MetadataService(Resource):
             return []
         indice_name = json_data["indice_name"]
         metadata_provider = self.clip_resources[indice_name].metadata_provider
-        metas = metadata_provider.get(ids, self.clip_resources[indice_name].columns_to_return)
+        metas = metadata_provider.get(
+            ids, self.clip_resources[indice_name].columns_to_return
+        )
         for meta in metas:
             convert_metadata_to_base64(meta)
-        metas_with_ids = [{"id": item_id, "metadata": meta_to_dict(meta)} for item_id, meta in zip(ids, metas)]
+        metas_with_ids = [
+            {"id": item_id, "metadata": meta_to_dict(meta)}
+            for item_id, meta in zip(ids, metas)
+        ]
         return metas_with_ids
 
 
@@ -220,7 +259,9 @@ class KnnService(Resource):
                     query = normalized(clip_resource.model_txt_mclip(text_input))
             else:
                 with TEXT_PREPRO_TIME.time():
-                    text = clip.tokenize([text_input], truncate=True).to(clip_resource.device)
+                    text = clip.tokenize([text_input], truncate=True).to(
+                        clip_resource.device
+                    )
                 with TEXT_CLIP_INFERENCE_TIME.time():
                     with torch.no_grad():
                         text_features = clip_resource.model.encode_text(text)
@@ -234,7 +275,9 @@ class KnnService(Resource):
                 img_data = download_image(image_url_input)
             with IMAGE_PREPRO_TIME.time():
                 img = Image.open(img_data)
-                prepro = clip_resource.preprocess(img).unsqueeze(0).to(clip_resource.device)
+                prepro = (
+                    clip_resource.preprocess(img).unsqueeze(0).to(clip_resource.device)
+                )
             with IMAGE_CLIP_INFERENCE_TIME.time():
                 with torch.no_grad():
                     image_features = clip_resource.model.encode_image(prepro)
@@ -243,7 +286,10 @@ class KnnService(Resource):
         elif embedding_input is not None:
             query = np.expand_dims(np.array(embedding_input).astype("float32"), 0)
 
-        if clip_resource.aesthetic_embeddings is not None and aesthetic_score is not None:
+        if (
+            clip_resource.aesthetic_embeddings is not None
+            and aesthetic_score is not None
+        ):
             aesthetic_embedding = clip_resource.aesthetic_embeddings[aesthetic_score]
             query = query + aesthetic_embedding * aesthetic_weight
             query = query / np.linalg.norm(query)
@@ -287,7 +333,9 @@ class KnnService(Resource):
         """find non-unique embeddings"""
         index = faiss.IndexFlatIP(embeddings.shape[1])
         index.add(embeddings)  # pylint: disable=no-value-for-parameter
-        l, _, I = index.range_search(embeddings, threshold)  # pylint: disable=no-value-for-parameter,invalid-name
+        l, _, I = index.range_search(
+            embeddings, threshold
+        )  # pylint: disable=no-value-for-parameter,invalid-name
 
         same_mapping = defaultdict(list)
 
@@ -320,7 +368,13 @@ class KnnService(Resource):
         return np.where(safety_results == 1)[0]
 
     def post_filter(
-        self, safety_model, embeddings, deduplicate, use_safety_model, use_violence_detector, violence_detector
+        self,
+        safety_model,
+        embeddings,
+        deduplicate,
+        use_safety_model,
+        use_violence_detector,
+        violence_detector,
     ):
         """post filter results : dedup, safety, violence"""
         to_remove = set()
@@ -337,7 +391,14 @@ class KnnService(Resource):
         return to_remove
 
     def knn_search(
-        self, query, modality, num_result_ids, clip_resource, deduplicate, use_safety_model, use_violence_detector
+        self,
+        query,
+        modality,
+        num_result_ids,
+        clip_resource,
+        deduplicate,
+        use_safety_model,
+        use_violence_detector,
     ):
         """compute the knn search"""
 
@@ -354,15 +415,22 @@ class KnnService(Resource):
                 if num_result_ids >= 100000:
                     nprobe = math.ceil(num_result_ids / 3000)
                     params = faiss.ParameterSpace()
-                    params.set_index_parameters(index, f"nprobe={nprobe},efSearch={nprobe*2},ht={2048}")
-            distances, indices, embeddings = index.search_and_reconstruct(query, num_result_ids)
+                    params.set_index_parameters(
+                        index, f"nprobe={nprobe},efSearch={nprobe*2},ht={2048}"
+                    )
+            distances, indices, embeddings = index.search_and_reconstruct(
+                query, num_result_ids
+            )
             if clip_resource.metadata_is_ordered_by_ivf:
                 results = np.take(ivf_old_to_new_mapping, indices[0])
             else:
                 results = indices[0]
             if clip_resource.metadata_is_ordered_by_ivf:
                 params = faiss.ParameterSpace()
-                params.set_index_parameters(index, f"nprobe={previous_nprobe},efSearch={previous_nprobe*2},ht={2048}")
+                params.set_index_parameters(
+                    index,
+                    f"nprobe={previous_nprobe},efSearch={previous_nprobe*2},ht={2048}",
+                )
         nb_results = np.where(results == -1)[0]
 
         if len(nb_results) > 0:
@@ -394,7 +462,9 @@ class KnnService(Resource):
 
         return distances, indices
 
-    def map_to_metadata(self, indices, distances, num_images, metadata_provider, columns_to_return):
+    def map_to_metadata(
+        self, indices, distances, num_images, metadata_provider, columns_to_return
+    ):
         """map the indices to the metadata"""
 
         results = []
@@ -431,7 +501,12 @@ class KnnService(Resource):
     ):
         """implement the querying functionality of the knn service: from text and image to nearest neighbors"""
 
-        if text_input is None and image_input is None and image_url_input is None and embedding_input is None:
+        if (
+            text_input is None
+            and image_input is None
+            and image_url_input is None
+            and embedding_input is None
+        ):
             raise ValueError("must fill one of text, image and image url input")
         if indice_name is None:
             indice_name = next(iter(self.clip_resources.keys()))
@@ -460,7 +535,11 @@ class KnnService(Resource):
         if len(distances) == 0:
             return []
         results = self.map_to_metadata(
-            indices, distances, num_images, clip_resource.metadata_provider, clip_resource.columns_to_return
+            indices,
+            distances,
+            num_images,
+            clip_resource.metadata_provider,
+            clip_resource.columns_to_return,
         )
 
         return results
@@ -520,7 +599,8 @@ class ParquetMetadataProvider:
     def __init__(self, parquet_folder):
         data_dir = Path(parquet_folder)
         self.metadata_df = pd.concat(
-            pd.read_parquet(parquet_file) for parquet_file in sorted(data_dir.glob("*.parquet"))
+            pd.read_parquet(parquet_file)
+            for parquet_file in sorted(data_dir.glob("*.parquet"))
         )
 
     def get(self, ids, cols=None):
@@ -529,7 +609,10 @@ class ParquetMetadataProvider:
         else:
             cols = list(set(self.metadata_df.columns.tolist()) & set(cols))
 
-        return [self.metadata_df[i : (i + 1)][cols].to_dict(orient="records")[0] for i in ids]
+        return [
+            self.metadata_df[i : (i + 1)][cols].to_dict(orient="records")[0]
+            for i in ids
+        ]
 
 
 def parquet_to_hdf5(parquet_folder, output_hdf5_file, columns_to_return):
@@ -585,7 +668,9 @@ class Hdf5MetadataProvider:
 def load_index(path, enable_faiss_memory_mapping):
     if enable_faiss_memory_mapping:
         if os.path.isdir(path):
-            return faiss.read_index(path + "/populated.index", faiss.IO_FLAG_ONDISK_SAME_DIR)
+            return faiss.read_index(
+                path + "/populated.index", faiss.IO_FLAG_ONDISK_SAME_DIR
+            )
         else:
             return faiss.read_index(path, faiss.IO_FLAG_MMAP | faiss.IO_FLAG_READ_ONLY)
     else:
@@ -596,9 +681,14 @@ class ArrowMetadataProvider:
     """The arrow metadata provider provides metadata from contiguous ids using arrow"""
 
     def __init__(self, arrow_folder):
-        arrow_files = [str(a) for a in sorted(Path(arrow_folder).glob("**/*")) if a.is_file()]
+        arrow_files = [
+            str(a) for a in sorted(Path(arrow_folder).glob("**/*")) if a.is_file()
+        ]
         self.table = pa.concat_tables(
-            [pa.ipc.RecordBatchFileReader(pa.memory_map(arrow_file, "r")).read_all() for arrow_file in arrow_files]
+            [
+                pa.ipc.RecordBatchFileReader(pa.memory_map(arrow_file, "r")).read_all()
+                for arrow_file in arrow_files
+            ]
         )
 
     def get(self, ids, cols=None):
@@ -612,7 +702,12 @@ class ArrowMetadataProvider:
 
 
 def load_metadata_provider(
-    indice_folder, enable_hdf5, reorder_metadata_by_ivf_index, image_index, columns_to_return, use_arrow
+    indice_folder,
+    enable_hdf5,
+    reorder_metadata_by_ivf_index,
+    image_index,
+    columns_to_return,
+    use_arrow,
 ):
     """load the metadata provider"""
     parquet_folder = indice_folder + "/metadata"
@@ -628,16 +723,25 @@ def load_metadata_provider(
             if not os.path.exists(ivf_old_to_new_mapping_path):
                 ivf_old_to_new_mapping = get_old_to_new_mapping(image_index)
                 ivf_old_to_new_mapping_write = np.memmap(
-                    ivf_old_to_new_mapping_path, dtype="int64", mode="write", shape=ivf_old_to_new_mapping.shape
+                    ivf_old_to_new_mapping_path,
+                    dtype="int64",
+                    mode="write",
+                    shape=ivf_old_to_new_mapping.shape,
                 )
                 ivf_old_to_new_mapping_write[:] = ivf_old_to_new_mapping
                 del ivf_old_to_new_mapping_write
                 del ivf_old_to_new_mapping
-            ivf_old_to_new_mapping = np.memmap(ivf_old_to_new_mapping_path, dtype="int64", mode="r")
+            ivf_old_to_new_mapping = np.memmap(
+                ivf_old_to_new_mapping_path, dtype="int64", mode="r"
+            )
             if not os.path.exists(hdf5_path):
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    re_order_parquet(image_index, parquet_folder, str(tmpdir), columns_to_return)
-                    external_sort_parquet(Hdf5Sink(hdf5_path, columns_to_return), str(tmpdir))
+                    re_order_parquet(
+                        image_index, parquet_folder, str(tmpdir), columns_to_return
+                    )
+                    external_sort_parquet(
+                        Hdf5Sink(hdf5_path, columns_to_return), str(tmpdir)
+                    )
         else:
             hdf5_path = indice_folder + "/metadata.hdf5"
             if not os.path.exists(hdf5_path):
@@ -721,7 +825,9 @@ def load_violence_detector(clip_model):
 def load_safety_model(clip_model):
     """load the safety model"""
     import autokeras as ak  # pylint: disable=import-outside-toplevel
-    from tensorflow.keras.models import load_model  # pylint: disable=import-outside-toplevel
+    from tensorflow.keras.models import (
+        load_model,
+    )  # pylint: disable=import-outside-toplevel
 
     cache_folder = get_cache_folder(clip_model)
 
@@ -736,17 +842,19 @@ def load_safety_model(clip_model):
     if not os.path.exists(model_dir):
         os.makedirs(cache_folder, exist_ok=True)
 
-        from urllib.request import urlretrieve  # pylint: disable=import-outside-toplevel
+        from urllib.request import (
+            urlretrieve,
+        )  # pylint: disable=import-outside-toplevel
 
         path_to_zip_file = cache_folder + "/clip_autokeras_binary_nsfw.zip"
         if clip_model == "ViT-L/14":
             url_model = "https://raw.githubusercontent.com/LAION-AI/CLIP-based-NSFW-Detector/main/clip_autokeras_binary_nsfw.zip"
         elif clip_model == "ViT-B/32":
-            url_model = (
-                "https://raw.githubusercontent.com/LAION-AI/CLIP-based-NSFW-Detector/main/clip_autokeras_nsfw_b32.zip"
-            )
+            url_model = "https://raw.githubusercontent.com/LAION-AI/CLIP-based-NSFW-Detector/main/clip_autokeras_nsfw_b32.zip"
         else:
-            raise ValueError("Unknown model {}".format(clip_model))  # pylint: disable=consider-using-f-string
+            raise ValueError(
+                "Unknown model {}".format(clip_model)
+            )  # pylint: disable=consider-using-f-string
         urlretrieve(url_model, path_to_zip_file)
         import zipfile  # pylint: disable=import-outside-toplevel
 
@@ -754,7 +862,9 @@ def load_safety_model(clip_model):
             zip_ref.extractall(cache_folder)
 
     loaded_model = load_model(model_dir, custom_objects=ak.CUSTOM_OBJECTS)
-    loaded_model.predict(np.random.rand(10**3, dim).astype("float32"), batch_size=10**3)
+    loaded_model.predict(
+        np.random.rand(10**3, dim).astype("float32"), batch_size=10**3
+    )
 
     return loaded_model
 
@@ -798,13 +908,19 @@ class ClipOptions:
 
 def dict_to_clip_options(d, clip_options):
     return ClipOptions(
-        indice_folder=d["indice_folder"] if "indice_folder" in d else clip_options.indice_folder,
+        indice_folder=d["indice_folder"]
+        if "indice_folder" in d
+        else clip_options.indice_folder,
         clip_model=d["clip_model"] if "clip_model" in d else clip_options.clip_model,
-        enable_hdf5=d["enable_hdf5"] if "enable_hdf5" in d else clip_options.enable_hdf5,
+        enable_hdf5=d["enable_hdf5"]
+        if "enable_hdf5" in d
+        else clip_options.enable_hdf5,
         enable_faiss_memory_mapping=d["enable_faiss_memory_mapping"]
         if "enable_faiss_memory_mapping" in d
         else clip_options.enable_faiss_memory_mapping,
-        columns_to_return=d["columns_to_return"] if "columns_to_return" in d else clip_options.columns_to_return,
+        columns_to_return=d["columns_to_return"]
+        if "columns_to_return" in d
+        else clip_options.columns_to_return,
         reorder_metadata_by_ivf_index=d["reorder_metadata_by_ivf_index"]
         if "reorder_metadata_by_ivf_index" in d
         else clip_options.reorder_metadata_by_ivf_index,
@@ -828,7 +944,9 @@ def dict_to_clip_options(d, clip_options):
 @lru_cache(maxsize=None)
 def load_mclip(clip_model):
     """load the mclip model"""
-    from multilingual_clip import pt_multilingual_clip  # pylint: disable=import-outside-toplevel
+    from multilingual_clip import (
+        pt_multilingual_clip,
+    )  # pylint: disable=import-outside-toplevel
     import transformers  # pylint: disable=import-outside-toplevel
     import torch  # pylint: disable=import-outside-toplevel
 
@@ -854,22 +972,34 @@ def load_mclip(clip_model):
 def load_clip_index(clip_options):
     """load the clip index"""
     import torch  # pylint: disable=import-outside-toplevel
-    from clip_retrieval.load_clip import load_clip  # pylint: disable=import-outside-toplevel
+    from clip_retrieval.load_clip import (
+        load_clip,
+    )  # pylint: disable=import-outside-toplevel
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model, preprocess = load_clip(clip_options.clip_model, use_jit=clip_options.use_jit, device=device)
+    model, preprocess = load_clip(
+        clip_options.clip_model, use_jit=clip_options.use_jit, device=device
+    )
 
     if clip_options.enable_mclip_option:
         model_txt_mclip = load_mclip(clip_options.clip_model)
     else:
         model_txt_mclip = None
 
-    safety_model = load_safety_model(clip_options.clip_model) if clip_options.provide_safety_model else None
+    safety_model = (
+        load_safety_model(clip_options.clip_model)
+        if clip_options.provide_safety_model
+        else None
+    )
     violence_detector = (
-        load_violence_detector(clip_options.clip_model) if clip_options.provide_violence_detector else None
+        load_violence_detector(clip_options.clip_model)
+        if clip_options.provide_violence_detector
+        else None
     )
     aesthetic_embeddings = (
-        get_aesthetic_embedding(clip_options.clip_model) if clip_options.provide_aesthetic_embeddings else None
+        get_aesthetic_embedding(clip_options.clip_model)
+        if clip_options.provide_aesthetic_embeddings
+        else None
     )
 
     image_present = os.path.exists(clip_options.indice_folder + "/image.index")
@@ -877,12 +1007,18 @@ def load_clip_index(clip_options):
 
     LOGGER.info("loading indices...")
     image_index = (
-        load_index(clip_options.indice_folder + "/image.index", clip_options.enable_faiss_memory_mapping)
+        load_index(
+            clip_options.indice_folder + "/image.index",
+            clip_options.enable_faiss_memory_mapping,
+        )
         if image_present
         else None
     )
     text_index = (
-        load_index(clip_options.indice_folder + "/text.index", clip_options.enable_faiss_memory_mapping)
+        load_index(
+            clip_options.indice_folder + "/text.index",
+            clip_options.enable_faiss_memory_mapping,
+        )
         if text_present
         else None
     )
@@ -908,7 +1044,9 @@ def load_clip_index(clip_options):
         metadata_provider=metadata_provider,
         image_index=image_index,
         text_index=text_index,
-        ivf_old_to_new_mapping=ivf_old_to_new_mapping if clip_options.reorder_metadata_by_ivf_index else None,
+        ivf_old_to_new_mapping=ivf_old_to_new_mapping
+        if clip_options.reorder_metadata_by_ivf_index
+        else None,
         columns_to_return=clip_options.columns_to_return,
         metadata_is_ordered_by_ivf=clip_options.reorder_metadata_by_ivf_index,
         aesthetic_embeddings=aesthetic_embeddings,
@@ -930,7 +1068,9 @@ def load_clip_indices(
     for name, indice_value in indices.items():
         # if indice_folder is a string
         if isinstance(indice_value, str):
-            clip_options = dict_to_clip_options({"indice_folder": indice_value}, clip_options)
+            clip_options = dict_to_clip_options(
+                {"indice_folder": indice_value}, clip_options
+            )
         elif isinstance(indice_value, dict):
             clip_options = dict_to_clip_options(indice_value, clip_options)
         else:
@@ -983,13 +1123,19 @@ def clip_back(
 
     app = Flask(__name__)
     app.wsgi_app = DispatcherMiddleware(app.wsgi_app, {"/metrics": make_wsgi_app()})
-    from .clip_front import add_static_endpoints  # pylint: disable=import-outside-toplevel
+    from .clip_front import (
+        add_static_endpoints,
+    )  # pylint: disable=import-outside-toplevel
 
     add_static_endpoints(app, default_backend, None, url_column)
 
     api = Api(app)
     api.add_resource(MetricsSummary, "/metrics-summary")
-    api.add_resource(IndicesList, "/indices-list", resource_class_kwargs={"indices": list(clip_resources.keys())})
+    api.add_resource(
+        IndicesList,
+        "/indices-list",
+        resource_class_kwargs={"indices": list(clip_resources.keys())},
+    )
     api.add_resource(
         MetadataService,
         "/metadata",
