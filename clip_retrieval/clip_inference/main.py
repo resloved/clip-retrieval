@@ -7,7 +7,10 @@ from braceexpand import braceexpand
 from clip_retrieval.clip_inference.logger import LoggerReader
 from clip_retrieval.clip_inference.reader import folder_to_keys
 from clip_retrieval.clip_inference.slurm_distributor import SlurmDistributor
-from clip_retrieval.clip_inference.distributor import PysparkDistributor, SequentialDistributor
+from clip_retrieval.clip_inference.distributor import (
+    PysparkDistributor,
+    SequentialDistributor,
+)
 
 
 def calculate_partition_count(
@@ -83,6 +86,7 @@ def main(
     mclip_model="sentence-transformers/clip-ViT-B-32-multilingual-v1",
     use_mclip=False,
     use_jit=False,
+    frame_weighting="first",
     distribution_strategy="sequential",
     wds_number_file_per_input_file=10000,
     output_partition_count=None,
@@ -102,11 +106,20 @@ def main(
     # package arguments to pass on to the distributor
     local_args = dict(locals())
 
-    expanded_dataset = list(braceexpand(input_dataset)) if input_format == "webdataset" else input_dataset
+    expanded_dataset = (
+        list(braceexpand(input_dataset))
+        if input_format == "webdataset"
+        else input_dataset
+    )
 
     # compute this now for the distributors to use
     if output_partition_count is None:
-        output_partition_count, enable_text, enable_image, enable_metadata = calculate_partition_count(
+        (
+            output_partition_count,
+            enable_text,
+            enable_image,
+            enable_metadata,
+        ) = calculate_partition_count(
             input_format=input_format,
             input_dataset=expanded_dataset,
             enable_image=enable_image,
@@ -136,8 +149,14 @@ def main(
     elif distribution_strategy == "pyspark":
         distributor = PysparkDistributor(tasks=tasks, worker_args=worker_args)
     elif distribution_strategy == "slurm":
-        slurm_args = {k.lstrip("slurm_"): v for k, v in local_args.items() if k.startswith("slurm_")}
-        distributor = SlurmDistributor(tasks=tasks, worker_args=worker_args, slurm_args=slurm_args)
+        slurm_args = {
+            k.lstrip("slurm_"): v
+            for k, v in local_args.items()
+            if k.startswith("slurm_")
+        }
+        distributor = SlurmDistributor(
+            tasks=tasks, worker_args=worker_args, slurm_args=slurm_args
+        )
     else:
         print(
             f"The {distribution_strategy} strategy is not implemented. Please choose from: [sequential, pyspark, slurm]"

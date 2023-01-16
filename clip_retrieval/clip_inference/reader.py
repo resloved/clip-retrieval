@@ -61,6 +61,7 @@ def get_image_dataset():
             enable_text=True,
             enable_image=True,
             enable_metadata=False,
+            frame_weighting="first",
             input_sampler=lambda a: a,
         ):
             super().__init__()
@@ -73,6 +74,7 @@ def get_image_dataset():
             self.enable_text = enable_text
             self.enable_image = enable_image
             self.enable_metadata = enable_metadata
+            self.frame_weighting = frame_weighting
             keys_set = set(self.keys)
             if self.enable_text:
                 self.tokenizer = lambda text: clip.tokenize([text], truncate=True)[0]
@@ -97,9 +99,16 @@ def get_image_dataset():
             if self.enable_image:
                 image_file = self.image_files[key]
                 try:
-                    image_tensor = self.image_transform(
-                        next(ImageSequence.Iterator(Image.open(image_file)))
-                    )
+                    if self.frame_weighting == "average":
+                        frames = []
+                        for frame in ImageSequence.Iterator(Image.open(image_file)):
+                            new_tensor = self.image_transform(frame)
+                            frames.append(new_tensor)
+                        image_tensor = torch.mean(torch.stack(frames), dim=0)
+                    else:  # first
+                        image_tensor = self.image_transform(
+                            next(ImageSequence.Iterator(Image.open(image_file)))
+                        )
                 except Exception as e:
                     print(image_file, e)
                     image_tensor = torch.zeros([3, 224, 224], dtype=torch.float32)
@@ -133,6 +142,7 @@ def create_webdataset(
     enable_metadata=False,
     cache_path=None,
     input_sampler=lambda a: a,
+    frame_weighting="first",
 ):
     """Create a WebDataset reader, it can read a webdataset of image, text and json"""
     import clip  # pylint: disable=import-outside-toplevel
@@ -163,9 +173,21 @@ def create_webdataset(
         output = {}
         if enable_image:
             image_data = item[image_key]
-            image_tensor = image_transform(
-                next(ImageSequence.Iterator(Image.open(io.BytesIO(image_data))))
-            )
+            try:
+                if frame_weighting == "average":
+                    frames = []
+                    for frame in ImageSequence.Iterator(
+                        Image.open(io.BytesIO(image_data))
+                    ):
+                        frames.append(self.image_transform(frame))
+                    image_tensor = torch.mean(torch.stack(frames), dim=0)
+                else:  # first
+                    image_tensor = self.image_transform(
+                        next(ImageSequence.Iterator(Image.open(io.BytesIO(image_data))))
+                    )
+            except Exception as e:
+                print(image_file, e)
+                image_tensor = torch.zeros([3, 224, 224], dtype=torch.float32)
             output["image_filename"] = item["__key__"]
             output["image_tensor"] = image_tensor
 
@@ -220,6 +242,7 @@ class FilesReader:
         enable_text=True,
         enable_image=True,
         enable_metadata=False,
+        frame_weighting="first",
     ) -> None:
         super().__init__()
         dataset = get_image_dataset()(
@@ -228,6 +251,7 @@ class FilesReader:
             enable_text,
             enable_image,
             enable_metadata,
+            frame_weighting,
             sampler,
         )
         self.dataloader = dataset_to_dataloader(
@@ -255,6 +279,7 @@ class WebdatasetReader:
         wds_image_key="jpg",
         wds_caption_key="txt",
         cache_path=None,
+        frame_weighting="first",
     ):
         self.batch_size = batch_size
         dataset = create_webdataset(
@@ -267,6 +292,7 @@ class WebdatasetReader:
             enable_metadata=enable_metadata,
             cache_path=cache_path,
             input_sampler=sampler,
+            frame_weighting=frame_weighting,
         )
         self.dataloader = dataset_to_dataloader(
             dataset, batch_size, num_prepro_workers, "webdataset"

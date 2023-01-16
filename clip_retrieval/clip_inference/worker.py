@@ -37,6 +37,7 @@ def worker(
     mclip_model="sentence-transformers/clip-ViT-B-32-multilingual-v1",
     use_mclip=False,
     use_jit=True,
+    frame_weighting="first",
     clip_cache_path=None,
 ):
     """Start a worker"""
@@ -50,7 +51,10 @@ def worker(
 
     def reader_builder(sampler):
         _, preprocess = load_clip(
-            clip_model=clip_model, use_jit=use_jit, warmup_batch_size=batch_size, clip_cache_path=clip_cache_path
+            clip_model=clip_model,
+            use_jit=use_jit,
+            warmup_batch_size=batch_size,
+            clip_cache_path=clip_cache_path,
         )
         if input_format == "files":
             return FilesReader(
@@ -62,6 +66,7 @@ def worker(
                 enable_text=enable_text,
                 enable_image=enable_image,
                 enable_metadata=enable_metadata,
+                frame_weighting=frame_weighting,
             )
         elif input_format == "webdataset":
             return WebdatasetReader(
@@ -76,6 +81,7 @@ def worker(
                 wds_image_key=wds_image_key,
                 wds_caption_key=wds_caption_key,
                 cache_path=cache_path,
+                frame_weighting=frame_weighting,
             )
         else:
             raise ValueError(f"Unknown input_format: {input_format}")
