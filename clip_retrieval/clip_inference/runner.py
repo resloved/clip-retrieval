@@ -11,13 +11,24 @@ class Sampler:
         self.output_partition_count = output_partition_count
 
     def __call__(self, l):
-        return [e for i, e in enumerate(l) if i % self.output_partition_count == self.output_partition_id]
+        return [
+            e
+            for i, e in enumerate(l)
+            if i % self.output_partition_count == self.output_partition_id
+        ]
 
 
 class Runner:
     """Runner class"""
 
-    def __init__(self, reader_builder, mapper_builder, writer_builder, logger_builder, output_partition_count):
+    def __init__(
+        self,
+        reader_builder,
+        mapper_builder,
+        writer_builder,
+        logger_builder,
+        output_partition_count,
+    ):
         self.reader_builder = reader_builder
         self.mapper_builder = mapper_builder
         self.writer_builder = writer_builder
@@ -55,8 +66,8 @@ class Runner:
                     "inference_duration": inference_duration,
                     "write_duration": write_duration,
                     "total_duration": end_time - begin_time,
-                    "sample_count": batch["image_tensor"].shape[0]
-                    if "image_tensor" in batch
+                    "sample_count": len(batch["image_filename"])
+                    if "image_filename" in batch
                     else batch["text_tokens"].shape[0],
                 }
             )

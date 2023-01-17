@@ -37,8 +37,8 @@ def worker(
     mclip_model="sentence-transformers/clip-ViT-B-32-multilingual-v1",
     use_mclip=False,
     use_jit=True,
-    frame_weighting="first",
     clip_cache_path=None,
+    frame_weighting="first",
 ):
     """Start a worker"""
     print("Starting the worker", flush=True)
@@ -50,28 +50,19 @@ def worker(
     print(f"dataset is {len(input_dataset)}", flush=True)
 
     def reader_builder(sampler):
-        _, preprocess = load_clip(
-            clip_model=clip_model,
-            use_jit=use_jit,
-            warmup_batch_size=batch_size,
-            clip_cache_path=clip_cache_path,
-        )
         if input_format == "files":
             return FilesReader(
                 sampler,
-                preprocess,
                 input_dataset,
                 batch_size,
                 num_prepro_workers,
                 enable_text=enable_text,
                 enable_image=enable_image,
                 enable_metadata=enable_metadata,
-                frame_weighting=frame_weighting,
             )
         elif input_format == "webdataset":
             return WebdatasetReader(
                 sampler,
-                preprocess,
                 input_dataset,
                 batch_size,
                 num_prepro_workers,
@@ -81,7 +72,6 @@ def worker(
                 wds_image_key=wds_image_key,
                 wds_caption_key=wds_caption_key,
                 cache_path=cache_path,
-                frame_weighting=frame_weighting,
             )
         else:
             raise ValueError(f"Unknown input_format: {input_format}")
@@ -95,8 +85,9 @@ def worker(
             clip_model=clip_model,
             use_jit=use_jit,
             mclip_model=mclip_model,
-            clip_cache_path=clip_cache_path,
             warmup_batch_size=batch_size,
+            clip_cache_path=clip_cache_path,
+            frame_weighting=frame_weighting,
         )
 
     def writer_builder(i):
