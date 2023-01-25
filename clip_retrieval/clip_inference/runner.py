@@ -58,6 +58,14 @@ class Runner:
             writer(embeddings)
             write_duration = time.perf_counter() - start_time
             end_time = time.time()
+
+            if "image_filename" in batch:
+                sample_count = len(batch["image_filename"])
+            elif "text_tokens" in batch:
+                sample_count = batch["text_tokens"].shape[0]
+            else:
+                sample_count = len(batch["metadata"])
+
             logger(
                 {
                     "start_time": begin_time,
@@ -66,9 +74,7 @@ class Runner:
                     "inference_duration": inference_duration,
                     "write_duration": write_duration,
                     "total_duration": end_time - begin_time,
-                    "sample_count": len(batch["image_filename"])
-                    if "image_filename" in batch
-                    else batch["text_tokens"].shape[0],
+                    "sample_count": sample_count,
                 }
             )
         logger.end()
